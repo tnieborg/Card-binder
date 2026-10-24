@@ -65,6 +65,12 @@ button.primary{background:var(--acc);color:var(--acc-ink);border-color:var(--acc
     <div class="stat"><b id="sValue">€0.00</b><span>value of owned cards</span></div>
   </div>
 
+  <div class="bar">
+    <select id="binder" aria-label="Binder"></select>
+    <button id="newB">New binder</button>
+    <button id="delB">Delete binder</button>
+  </div>
+
   <div class="tabs" role="tablist">
     <button class="tab" role="tab" id="tabList" aria-selected="true">My list</button>
     <button class="tab" role="tab" id="tabFind" aria-selected="false">Find cards</button>
@@ -100,7 +106,7 @@ button.primary{background:var(--acc);color:var(--acc-ink);border-color:var(--acc
   <section id="find" hidden>
     <div class="stat" style="margin-top:14px;width:100%">
       <b style="font-size:1.1rem">Collect by Pokémon name</b>
-      <span>One name per line or comma separated. Counts every English card of that Pokémon.</span>
+      <span>One name per line or comma separated. Counts every English card of that Pokémon. Added cards go into the binder you have selected.</span>
       <div class="bar">
         <textarea id="bulkCore" rows="5" style="flex:1;min-width:220px" aria-label="Main Pokémon">Magearna, Cramorant, Lechonk, Dunsparce, Dudunsparce, Psyduck, Squirtle, Treecko, Snivy, Totodile, Turtwig, Fennekin, Fuecoco</textarea>
         <textarea id="bulkNice" rows="5" style="flex:1;min-width:220px" aria-label="Nice to have Pokémon">Tinkatink, Tinkatuff, Tinkaton, Meltan</textarea>
@@ -114,7 +120,11 @@ button.primary{background:var(--acc);color:var(--acc-ink);border-color:var(--acc
     </div>
     <div class="bar">
       <select id="setSel" aria-label="Browse a set"><option value="">Browse a set…</option></select>
-      <button id="addSet" hidden>Add whole set</button>
+      <button id="addSet" hidden>Add all</button>
+    </div>
+    <div class="bar">
+      <input type="search" id="ill" placeholder="Illustrator, e.g. Yuka Morii">
+      <button id="goIll">Find artist’s cards</button>
     </div>
     <div id="results" class="msg">Search for a card or pick a set to start building your list.</div>
   </section>
@@ -127,13 +137,22 @@ const API = "https://api.tcgdex.net/v2/en";
 const KEY = "cardbinder.v1";
 let cards = [];
 try { cards = JSON.parse(localStorage.getItem(KEY)) || []; } catch (e) { cards = []; }
+cards.forEach(c => { c.binder = c.binder || "Main"; });
+let binders = [], cur = "Main";
+try { binders = JSON.parse(localStorage.getItem(KEY + ".binders")) || []; cur = localStorage.getItem(KEY + ".cur") || "Main"; } catch (e) {}
+function syncBinders() {
+  cards.forEach(c => { if (!binders.includes(c.binder)) binders.push(c.binder); });
+  if (!binders.length) binders.push("Main");
+  if (!binders.includes(cur)) cur = binders[0];
+}
+syncBinders();
 const $ = id => document.getElementById(id);
-const save = () => { try { localStorage.setItem(KEY, JSON.stringify(cards)); } catch (e) {} };
+const save = () => { try { localStorage.setItem(KEY, JSON.stringify(cards)); localStorage.setItem(KEY + ".binders", JSON.stringify(binders)); localStorage.setItem(KEY + ".cur", cur); } catch (e) {} };
 const physical = c => !/^(A\d|B\d|P-A)/i.test(c.id);
 const basis = () => $("basis").value;
 const priceEur = c => c.cm ? (c.cm[basis()] ?? c.cm.trend ?? c.cm.avg ?? null) : (c.eur ?? null);
 const eur = n => "€" + n.toFixed(2);
-const has = id => cards.some(c => c.id === id);
+const has = id => cards.some(c => c.id === id && c.binder === cur);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, m => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[m]));
 const img = c => c.image ? c.image + "/low.webp" : "";
 
@@ -167,7 +186,7 @@ async function hydrate(c) {
 }
 
 async function addCards(list, prio) {
-  const fresh = list.filter(b => !has(b.id)).map(b => ({ id: b.id, name: b.name, image: b.image, owned: false, prio: prio || b.prio || "core" }));
+  const fresh = list.filter(b => !has(b.id)).map(b => ({ id: b.id, name: b.name, image: b.image, owned: false, binder: cur, prio: prio || b.prio || "core" }));
   if (!fresh.length) return;
   cards.push(...fresh); save(); render();
   for (let i = 0; i < fresh.length; i += 6) {
@@ -177,8 +196,9 @@ async function addCards(list, prio) {
 }
 
 function render() {
+  $("binder").innerHTML = binders.map(b => `<option ${b === cur ? "selected" : ""}>${esc(b)}</option>`).join("");
   const f = $("filter").value, s = $("sort").value;
-  let v = cards.filter(c => f === "all" || (f === "owned" ? c.owned : f === "missing" ? !c.owned : f === "nice" ? c.prio === "nice" : c.prio !== "nice"));
+  let v = cards.filter(c => c.binder === cur && (f === "all" || (f === "owned" ? c.owned : f === "missing" ? !c.owned : f === "nice" ? c.prio === "nice" : c.prio !== "nice")));
   if (s === "name") v.sort((a, b) => a.name.localeCompare(b.name));
   if (s === "price") v.sort((a, b) => (priceEur(b) ?? -1) - (priceEur(a) ?? -1));
   $("listGrid").innerHTML = v.length ? v.map(c => `
@@ -189,15 +209,17 @@ function render() {
       <div class="meta">${esc(c.set || "")} ${esc(c.id.split("-").pop())}${c.rarity ? " · " + esc(c.rarity) : ""}</div>
       <div class="price">${priceEur(c) != null ? eur(priceEur(c)) : c.usd != null ? "$" + c.usd.toFixed(2) : c.failed ? "Price failed" : "No price"}</div>
       <label class="own"><input type="checkbox" data-own="${esc(c.id)}" ${c.owned ? "checked" : ""}> I have it</label>
-    </div>`).join("") : `<div class="msg" style="grid-column:1/-1">${cards.length ? "Nothing matches this filter." : "Your list is empty. Use Find cards to add some."}</div>`;
-  const owned = cards.filter(c => c.owned);
-  $("sOwned").textContent = owned.length + " / " + cards.length;
-  $("sMissing").textContent = eur(cards.filter(c => !c.owned).reduce((t, c) => t + (priceEur(c) || 0), 0));
+    </div>`).join("") : `<div class="msg" style="grid-column:1/-1">${cards.some(c => c.binder === cur) ? "Nothing matches this filter." : "Your list is empty. Use Find cards to add some."}</div>`;
+  const mine = cards.filter(c => c.binder === cur), owned = mine.filter(c => c.owned);
+  $("sOwned").textContent = owned.length + " / " + mine.length;
+  $("sMissing").textContent = eur(mine.filter(c => !c.owned).reduce((t, c) => t + (priceEur(c) || 0), 0));
   $("sValue").textContent = eur(owned.reduce((t, c) => t + (priceEur(c) || 0), 0));
 }
 
 function showResults(list) {
   const r = $("results");
+  list = list.filter(c => c.image && physical(c));
+  $("addSet").hidden = !list.length; $("addSet").textContent = "Add all " + list.length + " to " + cur;
   if (!list.length) { r.className = "msg"; r.textContent = "No cards found."; return; }
   r.className = "";
   const shown = list.slice(0, 80);
@@ -249,22 +271,31 @@ $("tabFind").onclick = () => tab("find");
 $("filter").onchange = $("sort").onchange = $("basis").onchange = () => { try { localStorage.setItem(KEY + ".basis", $("basis").value); } catch (e) {} render(); };
 $("go").onclick = () => { const q = $("q").value.trim(); if (q) { $("setSel").value = ""; $("addSet").hidden = true; run(() => api("/cards?name=" + encodeURIComponent(q)).then(l => l.filter(c => c.image && physical(c)))); } };
 $("q").onkeydown = e => { if (e.key === "Enter") $("go").click(); };
+$("goIll").onclick = () => { const q = $("ill").value.trim(); if (q) { $("setSel").value = ""; run(() => api("/cards?illustrator=" + encodeURIComponent(q))); } };
+$("ill").onkeydown = e => { if (e.key === "Enter") $("goIll").click(); };
+$("binder").onchange = e => { cur = e.target.value; save(); render(); };
+$("newB").onclick = () => { const n = (prompt("Name of the new binder") || "").trim(); if (!n) return; if (!binders.includes(n)) binders.push(n); cur = n; save(); render(); };
+$("delB").onclick = () => {
+  if (binders.length < 2) { alert("You need at least one binder."); return; }
+  if (!confirm("Delete the binder “" + cur + "” and all its cards?")) return;
+  cards = cards.filter(c => c.binder !== cur); binders = binders.filter(b => b !== cur); cur = binders[0]; save(); render();
+};
 $("setSel").onchange = e => {
   $("addSet").hidden = !e.target.value;
   if (e.target.value) run(() => api("/sets/" + encodeURIComponent(e.target.value)).then(s => s.cards));
 };
-$("addSet").onclick = () => { const l = $("results")._list; if (l) addCards(l).then(() => showResults(l)); tab("list"); };
+$("addSet").onclick = () => { const l = $("results")._list; if (l && l.length > 150 && !confirm("Add " + l.length + " cards to " + cur + "? Loading prices takes a while.")) return; if (l) addCards(l).then(() => showResults(l)); tab("list"); };
 $("results").onclick = e => {
   const id = e.target.dataset.add; if (!id) return;
   const c = $("results")._list.find(x => x.id === id);
   addCards([c]); e.target.disabled = true; e.target.textContent = "On your list";
 };
 $("listGrid").onclick = e => {
-  if (e.target.dataset.rm) { cards = cards.filter(c => c.id !== e.target.dataset.rm); save(); render(); }
+  if (e.target.dataset.rm) { cards = cards.filter(c => !(c.id === e.target.dataset.rm && c.binder === cur)); save(); render(); }
 };
 $("listGrid").onchange = e => {
   const id = e.target.dataset.own; if (!id) return;
-  cards.find(c => c.id === id).owned = e.target.checked; save(); render();
+  cards.find(c => c.id === id && c.binder === cur).owned = e.target.checked; save(); render();
 };
 $("refresh").onclick = async () => {
   const b = $("refresh"); b.disabled = true; b.textContent = "Refreshing…";
@@ -280,7 +311,7 @@ $("import").onclick = () => $("file").click();
 $("file").onchange = async e => {
   try {
     const d = JSON.parse(await e.target.files[0].text());
-    if (Array.isArray(d)) { cards = d; save(); render(); }
+    if (Array.isArray(d)) { cards = d; cards.forEach(c => { c.binder = c.binder || "Main"; }); syncBinders(); save(); render(); }
   } catch (err) { alert("That file is not a valid backup."); }
   e.target.value = "";
 };
