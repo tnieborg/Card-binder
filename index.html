@@ -60,7 +60,7 @@ button.primary{background:var(--acc);color:var(--acc-ink);border-color:var(--acc
 </header>
 <main>
   <div class="stats">
-    <div class="stat"><b id="sOwned">0 / 0</b><span>cards owned</span></div>
+    <div class="stat"><b id="sOwned">0 / 0</b><span id="sOwnedL">cards owned</span></div>
     <div class="stat hot"><b id="sMissing">€0.00</b><span>still to buy</span></div>
     <div class="stat"><b id="sValue">€0.00</b><span>value of owned cards</span></div>
   </div>
@@ -84,6 +84,7 @@ button.primary{background:var(--acc);color:var(--acc-ink);border-color:var(--acc
         <option value="owned">Owned</option>
         <option value="core">Main wishlist</option>
         <option value="nice">Nice to have</option>
+        <option value="dups">Duplicate prints</option>
       </select>
       <select id="sort" aria-label="Sort">
         <option value="added">Order added</option>
@@ -95,6 +96,8 @@ button.primary{background:var(--acc);color:var(--acc-ink);border-color:var(--acc
         <option value="avg7">Price: 7-day average</option>
         <option value="avg30">Price: 30-day average</option>
       </select>
+      <button id="masterB">Master set: off</button>
+      <button id="dedupe">Remove duplicates</button>
       <button id="refresh">Refresh prices</button>
       <button id="export">Export backup</button>
       <button id="import">Import backup</button>
@@ -146,8 +149,10 @@ function syncBinders() {
   if (!binders.includes(cur)) cur = binders[0];
 }
 syncBinders();
+let masters = {};
+try { masters = JSON.parse(localStorage.getItem(KEY + ".master")) || {}; } catch (e) {}
 const $ = id => document.getElementById(id);
-const save = () => { try { localStorage.setItem(KEY, JSON.stringify(cards)); localStorage.setItem(KEY + ".binders", JSON.stringify(binders)); localStorage.setItem(KEY + ".cur", cur); } catch (e) {} };
+const save = () => { try { localStorage.setItem(KEY, JSON.stringify(cards)); localStorage.setItem(KEY + ".binders", JSON.stringify(binders)); localStorage.setItem(KEY + ".cur", cur); localStorage.setItem(KEY + ".master", JSON.stringify(masters)); } catch (e) {} };
 const physical = c => !/^(A\d|B\d|P-A)/i.test(c.id);
 const basis = () => $("basis").value;
 const priceEur = c => c.cm ? (c.cm[basis()] ?? c.cm.trend ?? c.cm.avg ?? null) : (c.eur ?? null);
@@ -180,7 +185,8 @@ function priceOf(d) {
 async function hydrate(c) {
   try {
     const d = await api("/cards/" + encodeURIComponent(c.id));
-    c.set = d.set && d.set.name; c.rarity = d.rarity; c.image = d.image || c.image;
+    c.set = d.set && d.set.name; c.rarity = d.rarity; c.failed = false;
+    c.illu = d.illustrator || ""; c.hp = d.hp || ""; c.atk = (d.attacks || []).map(a => a.name).join("/"); c.variants = d.variants || null; c.image = d.image || c.image;
     const p = priceOf(d); c.cm = p.cm ?? null; c.eur = null; c.usd = p.usd ?? null; c.fetched = Date.now();
   } catch (e) { c.failed = true; }
 }
@@ -195,23 +201,49 @@ async function addCards(list, prio) {
   }
 }
 
+const VARS = [["normal", "Normal"], ["reverse", "Reverse holo"], ["holo", "Holo"], ["firstEdition", "1st edition"]];
+const availVars = c => c.variants ? VARS.filter(([k]) => c.variants[k]) : [];
+const isMaster = () => !!masters[cur];
+const dkey = c => c.illu ? [c.name, c.illu, c.hp, c.atk].join("|") : null;
+let dupCount = {};
+function ownBlock(c) {
+  const av = availVars(c);
+  if (!isMaster() || !av.length) return `<label class="own"><input type="checkbox" data-own="${esc(c.id)}" ${c.owned ? "checked" : ""}> I have it</label>`;
+  return av.map(([k, l]) => `<label class="own"><input type="checkbox" data-var="${esc(c.id)}|${k}" ${c.have && c.have[k] ? "checked" : ""}> ${l}</label>`).join("");
+}
+const dupBadge = c => { const k = dkey(c); return k && dupCount[k] > 1 ? " · ×" + dupCount[k] + " prints" : ""; };
+async function ensureDetails() {
+  const todo = cards.filter(c => c.illu === undefined && !c.failed);
+  for (let i = 0; i < todo.length; i += 6) await Promise.all(todo.slice(i, i + 6).map(hydrate));
+  if (todo.length) save();
+}
+const busy = async (btn, fn) => { const t = btn.textContent; btn.disabled = true; btn.textContent = "Loading details…"; try { await fn(); } finally { btn.disabled = false; btn.textContent = t; } };
+
 function render() {
+  dupCount = {};
+  cards.forEach(c => { if (c.binder === cur) { const k = dkey(c); if (k) dupCount[k] = (dupCount[k] || 0) + 1; } });
   $("binder").innerHTML = binders.map(b => `<option ${b === cur ? "selected" : ""}>${esc(b)}</option>`).join("");
   const f = $("filter").value, s = $("sort").value;
-  let v = cards.filter(c => c.binder === cur && (f === "all" || (f === "owned" ? c.owned : f === "missing" ? !c.owned : f === "nice" ? c.prio === "nice" : c.prio !== "nice")));
+  let v = cards.filter(c => c.binder === cur && (f === "all" || (f === "owned" ? c.owned : f === "missing" ? !c.owned : f === "nice" ? c.prio === "nice" : f === "dups" ? dupCount[dkey(c)] > 1 : c.prio !== "nice")));
   if (s === "name") v.sort((a, b) => a.name.localeCompare(b.name));
   if (s === "price") v.sort((a, b) => (priceEur(b) ?? -1) - (priceEur(a) ?? -1));
+  if (f === "dups") v.sort((a, b) => (dkey(a) || "").localeCompare(dkey(b) || ""));
   $("listGrid").innerHTML = v.length ? v.map(c => `
     <div class="card ${c.owned ? "owned" : ""}">
       <button class="x" data-rm="${esc(c.id)}" aria-label="Remove ${esc(c.name)}">×</button>
       <img src="${esc(img(c))}" alt="${esc(c.name)}" loading="lazy">
       <div class="name">${esc(c.name)}</div>${c.prio === "nice" ? '<div class="meta">Nice to have</div>' : ""}
-      <div class="meta">${esc(c.set || "")} ${esc(c.id.split("-").pop())}${c.rarity ? " · " + esc(c.rarity) : ""}</div>
+      <div class="meta">${esc(c.set || "")} ${esc(c.id.split("-").pop())}${c.rarity ? " · " + esc(c.rarity) : ""}${dupBadge(c)}</div>
       <div class="price">${priceEur(c) != null ? eur(priceEur(c)) : c.usd != null ? "$" + c.usd.toFixed(2) : c.failed ? "Price failed" : "No price"}</div>
-      <label class="own"><input type="checkbox" data-own="${esc(c.id)}" ${c.owned ? "checked" : ""}> I have it</label>
+      ${ownBlock(c)}
     </div>`).join("") : `<div class="msg" style="grid-column:1/-1">${cards.some(c => c.binder === cur) ? "Nothing matches this filter." : "Your list is empty. Use Find cards to add some."}</div>`;
   const mine = cards.filter(c => c.binder === cur), owned = mine.filter(c => c.owned);
-  $("sOwned").textContent = owned.length + " / " + mine.length;
+  if (isMaster()) {
+    let t = 0, h = 0;
+    mine.forEach(c => { const av = availVars(c); if (av.length) { t += av.length; h += av.filter(([k]) => c.have && c.have[k]).length; } else { t++; if (c.owned) h++; } });
+    $("sOwned").textContent = h + " / " + t; $("sOwnedL").textContent = "variants owned";
+  } else { $("sOwned").textContent = owned.length + " / " + mine.length; $("sOwnedL").textContent = "cards owned"; }
+  $("masterB").textContent = "Master set: " + (isMaster() ? "on" : "off");
   $("sMissing").textContent = eur(mine.filter(c => !c.owned).reduce((t, c) => t + (priceEur(c) || 0), 0));
   $("sValue").textContent = eur(owned.reduce((t, c) => t + (priceEur(c) || 0), 0));
 }
@@ -271,6 +303,21 @@ $("tabFind").onclick = () => tab("find");
 $("filter").onchange = $("sort").onchange = $("basis").onchange = () => { try { localStorage.setItem(KEY + ".basis", $("basis").value); } catch (e) {} render(); };
 $("go").onclick = () => { const q = $("q").value.trim(); if (q) { $("setSel").value = ""; $("addSet").hidden = true; run(() => api("/cards?name=" + encodeURIComponent(q)).then(l => l.filter(c => c.image && physical(c)))); } };
 $("q").onkeydown = e => { if (e.key === "Enter") $("go").click(); };
+$("filter").addEventListener("change", async () => { if ($("filter").value === "dups") { await ensureDetails(); render(); } });
+$("masterB").onclick = async () => { masters[cur] = !masters[cur]; save(); render(); if (masters[cur]) { await busy($("masterB"), ensureDetails); render(); } };
+$("dedupe").onclick = async () => {
+  await busy($("dedupe"), ensureDetails);
+  const groups = {};
+  cards.forEach(c => { const k = c.binder === cur && dkey(c); if (k) (groups[k] = groups[k] || []).push(c); });
+  const remove = [];
+  Object.values(groups).forEach(arr => {
+    if (arr.length < 2) return;
+    const keep = arr.find(c => c.owned) || [...arr].sort((a, b) => (priceEur(a) ?? 1e9) - (priceEur(b) ?? 1e9))[0];
+    arr.forEach(c => { if (c !== keep && !c.owned) remove.push(c); });
+  });
+  if (!remove.length) { alert("No duplicate prints found in this binder."); return; }
+  if (confirm("Remove " + remove.length + " duplicate prints from “" + cur + "”? For each card the owned print, or else the cheapest one, stays.")) { cards = cards.filter(c => !remove.includes(c)); save(); render(); }
+};
 $("goIll").onclick = () => { const q = $("ill").value.trim(); if (q) { $("setSel").value = ""; run(() => api("/cards?illustrator=" + encodeURIComponent(q))); } };
 $("ill").onkeydown = e => { if (e.key === "Enter") $("goIll").click(); };
 $("binder").onchange = e => { cur = e.target.value; save(); render(); };
@@ -294,6 +341,12 @@ $("listGrid").onclick = e => {
   if (e.target.dataset.rm) { cards = cards.filter(c => !(c.id === e.target.dataset.rm && c.binder === cur)); save(); render(); }
 };
 $("listGrid").onchange = e => {
+  const v = e.target.dataset.var;
+  if (v) {
+    const [vid, k] = v.split("|"), c = cards.find(x => x.id === vid && x.binder === cur);
+    c.have = c.have || {}; c.have[k] = e.target.checked; c.owned = availVars(c).every(([kk]) => c.have[kk]);
+    save(); render(); return;
+  }
   const id = e.target.dataset.own; if (!id) return;
   cards.find(c => c.id === id && c.binder === cur).owned = e.target.checked; save(); render();
 };
