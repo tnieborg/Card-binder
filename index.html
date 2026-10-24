@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0f766e">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Card Binder">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 100 100%27%3E%3Ctext y=%27.9em%27 font-size=%2790%27%3E%F0%9F%83%8F%3C/text%3E%3C/svg%3E">
+<title>Card Binder</title>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#e9eef3;--panel:#fff;--ink:#14213d;--mute:#5d6b82;--line:#cfd8e3;--acc:#0f766e;--acc-ink:#fff;--warn:#b45309;--own:#e6f4ef;color-scheme:light}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1724;--panel:#182235;--ink:#e8eef7;--mute:#93a2ba;--line:#2a3850;--acc:#2dd4bf;--acc-ink:#062a27;--warn:#fbbf24;--own:#14312f;color-scheme:dark}}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font-family:"Bricolage Grotesque",system-ui,-apple-system,Segoe UI,sans-serif;line-height:1.45}
+header{padding:28px 20px 8px;max-width:1200px;margin:auto}
+h1{margin:0;font-size:2rem;font-weight:800;letter-spacing:-.02em}
+.sub{color:var(--mute);margin:2px 0 0}
+main{max-width:1200px;margin:auto;padding:12px 20px 60px}
+.stats{display:flex;flex-wrap:wrap;gap:12px;margin:16px 0}
+.stat{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 16px;min-width:140px}
+.stat b{display:block;font-size:1.5rem;font-weight:800}
+.stat span{color:var(--mute);font-size:.85rem}
+.stat.hot b{color:var(--warn)}
+.bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:10px 0}
+input,select,button{font:inherit;color:var(--ink)}
+textarea{font:inherit;color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px 12px}
+input,select{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px 12px}
+input[type=search]{flex:1;min-width:200px}
+button{min-height:40px;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px 14px;cursor:pointer}
+button:hover{border-color:var(--acc)}
+button.primary{background:var(--acc);color:var(--acc-ink);border-color:var(--acc);font-weight:600}
+:focus-visible{outline:3px solid var(--acc);outline-offset:2px}
+.tabs{display:flex;gap:4px;border-bottom:2px solid var(--line);margin-top:18px}
+.tab{border:0;background:none;padding:10px 16px;font-weight:600;color:var(--mute);border-bottom:3px solid transparent;margin-bottom:-2px;border-radius:0}
+.tab[aria-selected=true]{color:var(--ink);border-bottom-color:var(--acc)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:14px;margin-top:14px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:8px;display:flex;flex-direction:column;gap:6px;position:relative}
+.card img{width:100%;aspect-ratio:245/342;object-fit:contain;border-radius:6px;background:var(--bg)}
+.card .name{font-weight:600;font-size:.92rem;line-height:1.2}
+.card .meta{color:var(--mute);font-size:.78rem}
+.card .price{font-weight:800}
+.card.owned{background:var(--own);border-color:var(--acc)}
+.card.owned img{opacity:.55}
+.own{display:flex;align-items:center;gap:8px;font-weight:600;cursor:pointer}
+.own input{width:20px;height:20px;accent-color:var(--acc)}
+.x{position:absolute;top:4px;right:4px;padding:2px 8px;border-radius:99px;background:var(--panel);font-size:.9rem;line-height:1.3}
+.msg{color:var(--mute);padding:30px 0;text-align:center}
+.err{color:var(--warn)}
+.note{font-size:.8rem;color:var(--mute);margin-top:30px}
+</style>
+</head>
+<body>
+<header>
+  <h1>Card Binder</h1>
+  <p class="sub">Collect the list, tick off what you own, see what the rest will cost.</p>
+</header>
+<main>
+  <div class="stats">
+    <div class="stat"><b id="sOwned">0 / 0</b><span>cards owned</span></div>
+    <div class="stat hot"><b id="sMissing">€0.00</b><span>still to buy</span></div>
+    <div class="stat"><b id="sValue">€0.00</b><span>value of owned cards</span></div>
+  </div>
+
+  <div class="tabs" role="tablist">
+    <button class="tab" role="tab" id="tabList" aria-selected="true">My list</button>
+    <button class="tab" role="tab" id="tabFind" aria-selected="false">Find cards</button>
+  </div>
+
+  <section id="list">
+    <div class="bar">
+      <select id="filter" aria-label="Filter">
+        <option value="all">All cards</option>
+        <option value="missing">Still need</option>
+        <option value="owned">Owned</option>
+        <option value="core">Main wishlist</option>
+        <option value="nice">Nice to have</option>
+      </select>
+      <select id="sort" aria-label="Sort">
+        <option value="added">Order added</option>
+        <option value="name">Name</option>
+        <option value="price">Price, high to low</option>
+      </select>
+      <select id="basis" aria-label="Price basis">
+        <option value="trend">Price: Cardmarket trend</option>
+        <option value="avg7">Price: 7-day average</option>
+        <option value="avg30">Price: 30-day average</option>
+      </select>
+      <button id="refresh">Refresh prices</button>
+      <button id="export">Export backup</button>
+      <button id="import">Import backup</button>
+      <input type="file" id="file" accept="application/json" hidden>
+    </div>
+    <div id="listGrid" class="grid"></div>
+  </section>
+
+  <section id="find" hidden>
+    <div class="stat" style="margin-top:14px;width:100%">
+      <b style="font-size:1.1rem">Collect by Pokémon name</b>
+      <span>One name per line or comma separated. Counts every English card of that Pokémon.</span>
+      <div class="bar">
+        <textarea id="bulkCore" rows="5" style="flex:1;min-width:220px" aria-label="Main Pokémon">Magearna, Cramorant, Lechonk, Dunsparce, Dudunsparce, Psyduck, Squirtle, Treecko, Snivy, Totodile, Turtwig, Fennekin, Fuecoco</textarea>
+        <textarea id="bulkNice" rows="5" style="flex:1;min-width:220px" aria-label="Nice to have Pokémon">Tinkatink, Tinkatuff, Tinkaton, Meltan</textarea>
+      </div>
+      <div class="bar"><button class="primary" id="count">Count cards</button><button id="addBulk" hidden>Add all to my list</button></div>
+      <div id="bulkOut"></div>
+    </div>
+    <div class="bar">
+      <input type="search" id="q" placeholder="Search by card name, e.g. Charizard">
+      <button class="primary" id="go">Search</button>
+    </div>
+    <div class="bar">
+      <select id="setSel" aria-label="Browse a set"><option value="">Browse a set…</option></select>
+      <button id="addSet" hidden>Add whole set</button>
+    </div>
+    <div id="results" class="msg">Search for a card or pick a set to start building your list.</div>
+  </section>
+
+  <p class="note">Card data and images from TCGdex. Prices are Cardmarket euro prices across all sellers (TCGdex cannot filter by seller country), using the trend or averages rather than the single cheapest listing. TCGplayer dollars are a fallback and left out of the totals. Your list is stored in this browser only; use Export backup to keep a copy.</p>
+</main>
+
+<script>
+const API = "https://api.tcgdex.net/v2/en";
+const KEY = "cardbinder.v1";
+let cards = [];
+try { cards = JSON.parse(localStorage.getItem(KEY)) || []; } catch (e) { cards = []; }
+const $ = id => document.getElementById(id);
+const save = () => { try { localStorage.setItem(KEY, JSON.stringify(cards)); } catch (e) {} };
+const physical = c => !/^(A\d|B\d|P-A)/i.test(c.id);
+const basis = () => $("basis").value;
+const priceEur = c => c.cm ? (c.cm[basis()] ?? c.cm.trend ?? c.cm.avg ?? null) : (c.eur ?? null);
+const eur = n => "€" + n.toFixed(2);
+const has = id => cards.some(c => c.id === id);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, m => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[m]));
+const img = c => c.image ? c.image + "/low.webp" : "";
+
+async function api(path) {
+  let r;
+  try { r = await fetch(API + path); } catch (e) { throw new Error("network request blocked or offline. Open this page from your own web server or a normal browser tab (not an embedded preview) and check ad blockers"); }
+  if (!r.ok) throw new Error("TCGdex returned " + r.status);
+  return r.json();
+}
+
+function priceOf(d) {
+  const cm = d.pricing && d.pricing.cardmarket;
+  if (cm && (cm.trend ?? cm.avg7 ?? cm.avg30 ?? cm.avg) != null) {
+    return { cm: { trend: cm.trend ?? null, avg7: cm.avg7 ?? null, avg30: cm.avg30 ?? null, avg: cm.avg ?? null } };
+  }
+  const tp = d.pricing && d.pricing.tcgplayer;
+  if (tp) {
+    for (const k of Object.keys(tp)) {
+      if (tp[k] && typeof tp[k] === "object" && tp[k].marketPrice != null) return { usd: tp[k].marketPrice };
+    }
+  }
+  return {};
+}
+
+async function hydrate(c) {
+  try {
+    const d = await api("/cards/" + encodeURIComponent(c.id));
+    c.set = d.set && d.set.name; c.rarity = d.rarity; c.image = d.image || c.image;
+    const p = priceOf(d); c.cm = p.cm ?? null; c.eur = null; c.usd = p.usd ?? null; c.fetched = Date.now();
+  } catch (e) { c.failed = true; }
+}
+
+async function addCards(list, prio) {
+  const fresh = list.filter(b => !has(b.id)).map(b => ({ id: b.id, name: b.name, image: b.image, owned: false, prio: prio || b.prio || "core" }));
+  if (!fresh.length) return;
+  cards.push(...fresh); save(); render();
+  for (let i = 0; i < fresh.length; i += 6) {
+    await Promise.all(fresh.slice(i, i + 6).map(hydrate));
+    save(); render();
+  }
+}
+
+function render() {
+  const f = $("filter").value, s = $("sort").value;
+  let v = cards.filter(c => f === "all" || (f === "owned" ? c.owned : f === "missing" ? !c.owned : f === "nice" ? c.prio === "nice" : c.prio !== "nice"));
+  if (s === "name") v.sort((a, b) => a.name.localeCompare(b.name));
+  if (s === "price") v.sort((a, b) => (priceEur(b) ?? -1) - (priceEur(a) ?? -1));
+  $("listGrid").innerHTML = v.length ? v.map(c => `
+    <div class="card ${c.owned ? "owned" : ""}">
+      <button class="x" data-rm="${esc(c.id)}" aria-label="Remove ${esc(c.name)}">×</button>
+      <img src="${esc(img(c))}" alt="${esc(c.name)}" loading="lazy">
+      <div class="name">${esc(c.name)}</div>${c.prio === "nice" ? '<div class="meta">Nice to have</div>' : ""}
+      <div class="meta">${esc(c.set || "")} ${esc(c.id.split("-").pop())}${c.rarity ? " · " + esc(c.rarity) : ""}</div>
+      <div class="price">${priceEur(c) != null ? eur(priceEur(c)) : c.usd != null ? "$" + c.usd.toFixed(2) : c.failed ? "Price failed" : "No price"}</div>
+      <label class="own"><input type="checkbox" data-own="${esc(c.id)}" ${c.owned ? "checked" : ""}> I have it</label>
+    </div>`).join("") : `<div class="msg" style="grid-column:1/-1">${cards.length ? "Nothing matches this filter." : "Your list is empty. Use Find cards to add some."}</div>`;
+  const owned = cards.filter(c => c.owned);
+  $("sOwned").textContent = owned.length + " / " + cards.length;
+  $("sMissing").textContent = eur(cards.filter(c => !c.owned).reduce((t, c) => t + (priceEur(c) || 0), 0));
+  $("sValue").textContent = eur(owned.reduce((t, c) => t + (priceEur(c) || 0), 0));
+}
+
+function showResults(list) {
+  const r = $("results");
+  if (!list.length) { r.className = "msg"; r.textContent = "No cards found."; return; }
+  r.className = "";
+  const shown = list.slice(0, 80);
+  r.innerHTML = `<div class="sub">${list.length} cards${list.length > 80 ? ", showing the first 80. Narrow your search." : ""}</div><div class="grid">` +
+    shown.map(c => `<div class="card"><img src="${esc(img(c))}" alt="${esc(c.name)}" loading="lazy">
+      <div class="name">${esc(c.name)}</div><div class="meta">${esc(c.id)}</div>
+      <button data-add="${esc(c.id)}" ${has(c.id) ? "disabled" : ""}>${has(c.id) ? "On your list" : "Add to list"}</button></div>`).join("") + "</div>";
+  r._list = list;
+}
+
+let bulk = null;
+async function countBulk() {
+  const out = $("bulkOut"), btn = $("count"); btn.disabled = true; $("addBulk").hidden = true;
+  const seen = new Set(), rows = []; bulk = [];
+  try {
+    for (const [prio, id] of [["core", "bulkCore"], ["nice", "bulkNice"]]) {
+      for (const name of $(id).value.split(/[,\n]/).map(x => x.trim()).filter(Boolean)) {
+        out.textContent = "Checking " + name + "…";
+        const re = new RegExp("\\b" + name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\b", "i");
+        const list = (await api("/cards?name=" + encodeURIComponent(name))).filter(c => c.image && physical(c) && re.test(c.name));
+        const fresh = list.filter(c => !seen.has(c.id));
+        fresh.forEach(c => { seen.add(c.id); bulk.push({ ...c, prio }); });
+        rows.push({ name, prio, n: list.length });
+      }
+    }
+    const tot = (p) => bulk.filter(c => c.prio === p).length;
+    out.innerHTML = `<table style="border-collapse:collapse;margin-top:8px">` + rows.map(r =>
+      `<tr><td style="padding:2px 16px 2px 0">${esc(r.name)}${r.prio === "nice" ? " (nice to have)" : ""}</td><td><b>${r.n}</b></td></tr>`).join("") +
+      `</table><p><b>${tot("core")}</b> main + <b>${tot("nice")}</b> nice to have = <b>${bulk.length}</b> unique English cards</p>`;
+    $("addBulk").hidden = !bulk.length;
+  } catch (e) { out.className = "err"; out.textContent = "Could not reach TCGdex: " + e.message; }
+  btn.disabled = false;
+}
+$("count").onclick = countBulk;
+$("addBulk").onclick = () => { addCards(bulk); tab("list"); };
+
+async function run(fn) {
+  const r = $("results"); r.className = "msg"; r.textContent = "Loading…";
+  try { showResults(await fn()); } catch (e) { r.className = "msg err"; r.textContent = "Could not reach TCGdex: " + e.message; }
+}
+
+function tab(name) {
+  $("list").hidden = name !== "list"; $("find").hidden = name !== "find";
+  $("tabList").setAttribute("aria-selected", name === "list"); $("tabFind").setAttribute("aria-selected", name === "find");
+}
+
+$("tabList").onclick = () => tab("list");
+$("tabFind").onclick = () => tab("find");
+$("filter").onchange = $("sort").onchange = $("basis").onchange = () => { try { localStorage.setItem(KEY + ".basis", $("basis").value); } catch (e) {} render(); };
+$("go").onclick = () => { const q = $("q").value.trim(); if (q) { $("setSel").value = ""; $("addSet").hidden = true; run(() => api("/cards?name=" + encodeURIComponent(q)).then(l => l.filter(c => c.image && physical(c)))); } };
+$("q").onkeydown = e => { if (e.key === "Enter") $("go").click(); };
+$("setSel").onchange = e => {
+  $("addSet").hidden = !e.target.value;
+  if (e.target.value) run(() => api("/sets/" + encodeURIComponent(e.target.value)).then(s => s.cards));
+};
+$("addSet").onclick = () => { const l = $("results")._list; if (l) addCards(l).then(() => showResults(l)); tab("list"); };
+$("results").onclick = e => {
+  const id = e.target.dataset.add; if (!id) return;
+  const c = $("results")._list.find(x => x.id === id);
+  addCards([c]); e.target.disabled = true; e.target.textContent = "On your list";
+};
+$("listGrid").onclick = e => {
+  if (e.target.dataset.rm) { cards = cards.filter(c => c.id !== e.target.dataset.rm); save(); render(); }
+};
+$("listGrid").onchange = e => {
+  const id = e.target.dataset.own; if (!id) return;
+  cards.find(c => c.id === id).owned = e.target.checked; save(); render();
+};
+$("refresh").onclick = async () => {
+  const b = $("refresh"); b.disabled = true; b.textContent = "Refreshing…";
+  for (let i = 0; i < cards.length; i += 6) { await Promise.all(cards.slice(i, i + 6).map(hydrate)); render(); }
+  save(); b.disabled = false; b.textContent = "Refresh prices";
+};
+$("export").onclick = () => {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(cards, null, 1)], { type: "application/json" }));
+  a.download = "card-binder-backup.json"; a.click();
+};
+$("import").onclick = () => $("file").click();
+$("file").onchange = async e => {
+  try {
+    const d = JSON.parse(await e.target.files[0].text());
+    if (Array.isArray(d)) { cards = d; save(); render(); }
+  } catch (err) { alert("That file is not a valid backup."); }
+  e.target.value = "";
+};
+
+api("/sets").then(sets => {
+  sets = sets.filter(physical);
+  sets.sort((a, b) => a.name.localeCompare(b.name));
+  $("setSel").innerHTML += sets.map(s => `<option value="${esc(s.id)}">${esc(s.name)} (${s.cardCount ? s.cardCount.total : "?"})</option>`).join("");
+}).catch(e => { $("results").textContent = "Could not reach TCGdex: " + e.message; $("results").className = "msg err"; });
+
+try { $("basis").value = localStorage.getItem(KEY + ".basis") || "trend"; } catch (e) {}
+render();
+</script>
+</body>
+</html>
